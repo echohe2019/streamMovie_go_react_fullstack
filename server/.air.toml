@@ -1,0 +1,36 @@
+# .air.toml
+
+[build]
+  bin = "./tmp/main"
+  cmd = "go build -o ./tmp/main ."
+  delay = 1000
+  exclude_dir = ["tmp", ".git"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  include_ext = ["go", "tpl", "tmpl", "html"]
+  kill_delay = 500
+  log = "build-errors.log"
+  send_interrupt = false
+  stop_on_error = true
+
+[color]
+  app = "magenta"
+  build = "yellow"
+  main = "cyan"
+  runner = "green"
+  watcher = "blue"
+
+[log]
+  time = false
+
+[server]
+  host = "0.0.0.0"
+  port = "8080"
+
+[watcher]
+  debounce = 100
+  follow_symlinks = false
+  full_restart = false
+  interval = 100
+  restart_delay = 0
+  roots = ["."]
