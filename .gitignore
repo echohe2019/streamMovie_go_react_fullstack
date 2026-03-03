@@ -46,8 +46,6 @@ TestResults.xml
 # React
 /node_modules
 /build
-.env
-.env.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
