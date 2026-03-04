@@ -2,7 +2,6 @@ package routes
 
 import (
 	controller "server/controllers"
-
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )

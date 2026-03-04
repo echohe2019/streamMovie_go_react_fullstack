@@ -120,8 +120,16 @@ func AdminReviewUpdate(client *mongo.Client) gin.HandlerFunc {
 		}
 
 		sentiment, rankVal, err := GetReviewRanking(req.AdminReview, client, c)
+
+		fmt.Println("Sentiment:", sentiment, "Rank Value:", rankVal)
 		if err != nil {
+			log.Printf("Error in GetReviewRanking: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error getting review ranking", "details": err.Error()})
+			return
+		}
+		if sentiment == "" || rankVal == 0 {
+			log.Printf("Invalid sentiment or rank value - sentiment: %s, rankVal: %d", sentiment, rankVal)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid sentiment analysis result"})
 			return
 		}
 		filter := bson.M{"imdb_id": movieId}
@@ -174,6 +182,7 @@ func GetReviewRanking(admin_review string, client *mongo.Client, c *gin.Context)
 	if OpenAiApiKey == "" {
 		return "", 0, errors.New("could not read OpenAI API key")
 	}
+	
 	llm, err := openai.New(openai.WithToken(OpenAiApiKey))
 	if err != nil {
 		return "", 0, err
@@ -181,19 +190,107 @@ func GetReviewRanking(admin_review string, client *mongo.Client, c *gin.Context)
 	base_Prompt_template := os.Getenv("BASE_PROMPT_TEMPLATE")
 	base_prompt := strings.Replace(base_Prompt_template, "{rankings}", sentimentDelimited, 1)
 
-	response, err := llm.Call(c, base_prompt+admin_review)
+	// Use the gin context which has 100s timeout
+	response, err := llm.Call(c.Request.Context(), base_prompt+admin_review)
 	if err != nil {
-		return "", 0, err
+		log.Printf("OpenAI API error: %v", err)
+		// Check if it's a timeout error and provide a fallback
+		if errors.Is(err, context.DeadlineExceeded) || isTimeoutError(err) {
+			log.Println("OpenAI API timeout - using fallback sentiment analysis")
+			// Fallback to simple keyword-based sentiment analysis
+			return getFallbackSentiment(admin_review, rankings)
+		}
+		return "", 0, fmt.Errorf("OpenAI API call failed: %w", err)
 	}
+	
+	// Clean up the response
+	response = strings.TrimSpace(response)
+	response = strings.Trim(response, "\"'`")
+	
 	rankVal := 0
+	found := false
 
 	for _, ranking := range rankings {
-		if ranking.RankingName == response {
+		if strings.EqualFold(ranking.RankingName, response) {
 			rankVal = ranking.RankingValue
+			found = true
 			break
 		}
 	}
+	
+	if !found {
+		log.Printf("Response '%s' not found in rankings", response)
+		// Fallback if OpenAI returns an unexpected response
+		return getFallbackSentiment(admin_review, rankings)
+	}
+	
 	return response, rankVal, nil
+}
+
+// isTimeoutError checks if an error is a timeout error
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "deadline") ||
+		strings.Contains(errStr, "context canceled")
+}
+
+// Fallback sentiment analysis when OpenAI API fails
+func getFallbackSentiment(review string, rankings []models.Ranking) (string, int, error) {
+	// Simple keyword-based sentiment analysis
+	review = strings.ToLower(review)
+	
+	positiveWords := []string{"good", "great", "excellent", "amazing", "fantastic", "wonderful", "awesome", "brilliant"}
+	negativeWords := []string{"bad", "terrible", "awful", "horrible", "disappointing", "poor", "boring", "worst"}
+	
+	positiveCount := 0
+	negativeCount := 0
+	
+	for _, word := range positiveWords {
+		if strings.Contains(review, word) {
+			positiveCount++
+		}
+	}
+	
+	for _, word := range negativeWords {
+		if strings.Contains(review, word) {
+			negativeCount++
+		}
+	}
+	
+	// Determine sentiment based on keyword counts
+	var selectedRanking models.Ranking
+	if positiveCount > negativeCount {
+		selectedRanking = findRankingByName("Positive", rankings)
+	} else if negativeCount > positiveCount {
+		selectedRanking = findRankingByName("Negative", rankings)
+	} else {
+		selectedRanking = findRankingByName("Neutral", rankings)
+	}
+	
+	if selectedRanking.RankingName == "" {
+		// Default to first available ranking if specific ones not found
+		if len(rankings) > 0 {
+			selectedRanking = rankings[0]
+		} else {
+			return "Neutral", 0, errors.New("no rankings available for fallback")
+		}
+	}
+	
+	log.Printf("Using fallback sentiment: %s (positive: %d, negative: %d)", selectedRanking.RankingName, positiveCount, negativeCount)
+	return selectedRanking.RankingName, selectedRanking.RankingValue, nil
+}
+
+func findRankingByName(name string, rankings []models.Ranking) models.Ranking {
+	for _, ranking := range rankings {
+		if strings.EqualFold(ranking.RankingName, name) {
+			return ranking
+		}
+	}
+	return models.Ranking{}
 }
 
 func GetRankings(client *mongo.Client, c *gin.Context) ([]models.Ranking, error) {
