@@ -100,6 +100,25 @@ func LoginUser(client *mongo.Client) gin.HandlerFunc {
 			return
 		}
 
+		http.SetCookie(c.Writer,&http.Cookie{
+			Name:"access_token",
+			Value:token,
+			Path:"/",
+			MaxAge:86400,
+			Secure: true,
+			HttpOnly: true,
+			SameSite: http.SameSiteNoneMode,
+		})
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:     "refresh_token",
+			Value:    refreshToken,
+			Path:     "/",
+			MaxAge:   604800,
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteNoneMode,
+		})
+
 		c.JSON(http.StatusOK, models.UserResponse{
 			UserId:          foundUser.UserID,
 			FirstName:       foundUser.FirstName,
@@ -107,8 +126,8 @@ func LoginUser(client *mongo.Client) gin.HandlerFunc {
 			Email:           foundUser.Email,
 			Role:            foundUser.Role,
 			FavouriteGenres: foundUser.FavouriteGenres,
-			Token:           token,
-			RefreshToken:    refreshToken,
+			//Token:           token,
+			//RefreshToken:    refreshToken,
 		})
 	}
 }
@@ -209,6 +228,7 @@ func RefreshTokenHandler(client *mongo.Client) gin.HandlerFunc {
 		}
 
 		newToken, newRefreshToken, _ := utils.GenerateAllTokens(user.Email, user.FirstName, user.LastName, user.Role, user.UserID)
+		
 		err = utils.UpdateAllTokens(user.UserID, newToken, newRefreshToken, client, c)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating tokens"})
